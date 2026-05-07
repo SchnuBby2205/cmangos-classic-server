@@ -370,7 +370,7 @@ set realmlist 127.0.0.1
 
 ---
 
-# Verbindung über VM oder anderes Gerät
+# Verbindung bei Betrieb über VM oder einem anderen Gerät
 
 Wenn der Server in einer VM, auf einem anderen Rechner oder im Netzwerk läuft, muss die IP-Adresse in der Datenbank angepasst werden.
 
