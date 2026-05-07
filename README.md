@@ -358,6 +358,60 @@ set realmlist 127.0.0.1
 
 ---
 
+# Verbindung über VM oder anderes Gerät
+
+Wenn der Server in einer VM, auf einem anderen Rechner oder im Netzwerk läuft, muss die IP-Adresse in der Datenbank angepasst werden.
+
+---
+
+## Realmlist IP anpassen
+
+In die MariaDB verbinden:
+
+bash id="5f2a8k" docker exec -it cmangos-db mariadb -uroot -proot 
+
+---
+
+## Classic Realmlist aktualisieren
+
+sql id="1m9c7p" USE classicrealmd;  UPDATE realmlist SET address = 'DEINE.SERVER.IP' WHERE id = 1; 
+
+Beispiel:
+
+sql id="7x4n2a" UPDATE realmlist SET address = '192.168.178.50' WHERE id = 1; 
+
+---
+
+## Änderungen prüfen
+
+sql id="4z6qje" SELECT * FROM realmlist; 
+
+---
+
+## WoW Client anpassen
+
+In der Datei:
+
+text id="9h1sbc" Data/deDE/realmlist.wtf 
+
+die IP des Servers eintragen:
+
+text id="lfzj12" set realmlist 192.168.178.50 
+
+---
+
+## Wichtiger Hinweis
+
+Falls der Server in einer VM läuft:
+
+- benötigte Ports freigeben
+- Bridged Networking bevorzugen
+- Firewall prüfen
+
+Benötigte Ports:
+
+text id="3x4vaf" 3724  -> Authserver 8085  -> Worldserver 5001  -> KoboldCPP (optional) 
+
 # AI Chat & Bots
 
 ## Random Bots
