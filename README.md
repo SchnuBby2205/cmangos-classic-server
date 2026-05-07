@@ -368,23 +368,32 @@ Wenn der Server in einer VM, auf einem anderen Rechner oder im Netzwerk läuft, 
 
 In die MariaDB verbinden:
 
-bash id="5f2a8k" docker exec -it cmangos-db mariadb -uroot -proot 
+```bash
+docker exec -it cmangos-db mariadb -uroot -proot 
+```
 
 ---
 
 ## Classic Realmlist aktualisieren
 
-sql id="1m9c7p" USE classicrealmd;  UPDATE realmlist SET address = 'DEINE.SERVER.IP' WHERE id = 1; 
+```sql
+USE classicrealmd;  
+UPDATE realmlist SET address = 'DEINE.SERVER.IP' WHERE id = 1; 
+```
 
 Beispiel:
 
-sql id="7x4n2a" UPDATE realmlist SET address = '192.168.178.50' WHERE id = 1; 
+```sql
+UPDATE realmlist SET address = '192.168.178.50' WHERE id = 1; 
+```
 
 ---
 
 ## Änderungen prüfen
 
-sql id="4z6qje" SELECT * FROM realmlist; 
+```sql
+SELECT * FROM realmlist; 
+```
 
 ---
 
@@ -392,11 +401,15 @@ sql id="4z6qje" SELECT * FROM realmlist;
 
 In der Datei:
 
-text id="9h1sbc" Data/deDE/realmlist.wtf 
+```text
+Data/deDE/realmlist.wtf 
+```
 
 die IP des Servers eintragen:
 
-text id="lfzj12" set realmlist 192.168.178.50 
+```text
+set realmlist 192.168.178.50 
+```
 
 ---
 
@@ -410,7 +423,11 @@ Falls der Server in einer VM läuft:
 
 Benötigte Ports:
 
-text id="3x4vaf" 3724  -> Authserver 8085  -> Worldserver 5001  -> KoboldCPP (optional) 
+```text
+3724  -> Authserver 
+8085  -> Worldserver 
+5001  -> KoboldCPP (optional) 
+```
 
 # AI Chat & Bots
 
