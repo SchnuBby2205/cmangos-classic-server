@@ -1,0 +1,83 @@
+services:
+
+  db:
+    image: mariadb:10.11
+    container_name: cmangos-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: mangos
+      MYSQL_PASSWORD: mangos
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./sql-init:/docker-entrypoint-initdb.d
+    networks:
+      - mangos-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mangosd:
+    image: cmangos-classic
+    container_name: cmangos-mangosd
+    command: /opt/mangos/bin/mangosd -c /opt/mangos/etc/mangosd.conf -a /opt/mangos/etc/ahbot.conf
+    volumes:
+      - ./data/maps:/opt/mangos/maps
+      - ./data/dbc:/opt/mangos/dbc
+      - ./data/vmaps:/opt/mangos/vmaps
+      - ./data/mmaps:/opt/mangos/mmaps
+      - ./config/mangosd.conf:/opt/mangos/etc/mangosd.conf
+      - ./config/ahbot.conf:/opt/mangos/etc/ahbot.conf
+      # aiplayerbot.conf MUSS nach /opt/etc/ gemountet werden!
+      # SYSCONFDIR = "../etc" relativ zu /opt/mangos/bin/ = /opt/etc/
+      - ./config/aiplayerbot.conf:/opt/etc/aiplayerbot.conf
+    ports:
+      - "8085:8085"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mangos-net
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+  realmd:
+    image: cmangos-classic
+    container_name: cmangos-realmd
+    command: /opt/mangos/bin/realmd -c /opt/mangos/etc/realmd.conf
+    volumes:
+      - ./config/realmd.conf:/opt/mangos/etc/realmd.conf
+    ports:
+      - "3724:3724"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mangos-net
+    restart: unless-stopped
+
+  koboldcpp:
+    image: koboldai/koboldcpp:latest
+    container_name: koboldcpp
+    environment:
+      KCPP_DONT_TUNNEL: "true"
+      KCPP_DONT_UPDATE: "true"
+      KCPP_ARGS: "--model /models/Llama-3.2-1B-Instruct-Uncensored.Q8_0.gguf --port 5001 --host 0.0.0.0 --threads 4 --nommap"
+    volumes:
+      - ./ai-models:/models
+      - koboldcpp_bin:/workspace
+    ports:
+      - "5001:5001"
+    networks:
+      - mangos-net
+    restart: unless-stopped
+
+networks:
+  mangos-net:
+
+volumes:
+  db_data:
+  koboldcpp_bin:

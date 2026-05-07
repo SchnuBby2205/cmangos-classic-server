@@ -1,0 +1,5 @@
+# Kleines Modell (~1.4 GB):
+wget https://huggingface.co/mradermacher/Llama-3.2-1B-Instruct-Uncensored-GGUF/resolve/main/Llama-3.2-1B-Instruct-Uncensored.Q8_0.gguf
+
+# Besseres Modell (~4.9 GB, empfohlen bei >= 16 GB RAM):
+wget https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q8_0.gguf
