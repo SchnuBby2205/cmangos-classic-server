@@ -228,9 +228,12 @@ sudo chown -R $USER:$USER wow-client/
 ## Daten verschieben
 
 ```bash
-mv wow-client/maps  data/
-mv wow-client/dbc   data/
-mv wow-client/vmaps data/
+mv wow-client/maps      data/
+mv wow-client/dbc       data/
+mv wow-client/vmaps     data/
+mv wow-client/mmaps     data/
+mv wow-client/cameras   data/
+mv wow-client/buildings data/
 ```
 
 ---
