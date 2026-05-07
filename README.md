@@ -244,10 +244,9 @@ Die AI-Modelle werden für KoboldCPP benötigt.
 
 ---
 
-## Modellordner erstellen
+## In den Modellordner wechseln
 
 ```bash
-mkdir -p ai-models
 cd ai-models
 ```
 
