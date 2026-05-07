@@ -206,11 +206,7 @@ docker run --rm -it \
 ## Empfohlene Antworten
 
 ```text
-Should all data be extracted?      -> n
-Should dbc and maps be extracted?  -> y
-Should vmaps be extracted?         -> y
-Should mmaps be extracted?         -> n
-Only reextract offmesh tiles?      -> n
+Should all data be extracted?      -> y
 High-resolution maps?              -> n
 High-resolution vmaps?             -> n
 ```
@@ -235,27 +231,6 @@ sudo chown -R $USER:$USER wow-client/
 mv wow-client/maps  data/
 mv wow-client/dbc   data/
 mv wow-client/vmaps data/
-```
-
----
-
-# MMAPS generieren (optional)
-
-MMAPS dauern sehr lange und können später erzeugt werden.
-
-```bash
-docker run --rm -it \
-    -v $(pwd)/wow-client:/wow \
-    -v $(pwd)/data/maps:/wow/maps \
-    -v $(pwd)/data/vmaps:/wow/vmaps \
-    -v $(pwd)/data:/data \
-    cmangos-classic \
-    bash -c "
-        mkdir -p /wow/mmaps && cd /wow && \
-        ./MoveMapGen --offMeshInput offmesh.txt 0 --threads $(nproc) && \
-        ./MoveMapGen --offMeshInput offmesh.txt 1 --threads $(nproc) && \
-        cp mmaps/* /data/mmaps/
-    "
 ```
 
 ---
