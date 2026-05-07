@@ -1,9 +1,5 @@
 # CMaNGOS Classic Server (Docker Edition)
 
-> English translation of the original German README.
-
----
-
 > Complete Docker setup for a local **CMaNGOS Classic 1.12 Server**
 > including:
 >
