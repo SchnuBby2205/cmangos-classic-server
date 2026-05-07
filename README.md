@@ -331,6 +331,18 @@ account create MeinAccount MeinPasswort
 account set gmlevel MeinAccount 3
 ```
 
+```text
+0 -> normaler Spieler Account
+3 -> GM Account
+```
+
+Nach dem ersten Start ist bereits ein GM Account angelegt:
+
+```text
+Name     -> wowclassicadmin
+Passwort -> nimdacissalcwow
+```
+
 ---
 
 ## Konsole verlassen ohne Stoppen
@@ -448,10 +460,10 @@ Random Bots laufen automatisch durch die Welt.
 
 ## AI Chat
 
-Damit Bots mit AI antworten:
+Damit Bots in der Gruppe mit AI antworten:
 
 ```text
-AiPlayerbot.LLMEnabled = 2
+/p nc +ai chat
 ```
 
 Danach einfach im Party-Chat mit Bots schreiben.
