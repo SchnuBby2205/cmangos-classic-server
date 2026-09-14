@@ -1,0 +1,895 @@
+================================================================================
+  CMaNGOS — Vollständige Docker Anleitung (Playerbots + AH-Bot + AI Chat)
+  Gültig für: Classic 1.12  |  TBC 2.4.3
+  Version 6 — Vollständig praxisgetestet für Classic UND TBC
+================================================================================
+
+
+EXPANSION-REFERENZ
+────────────────────────────────────────
+Diese Anleitung gilt für beide Expansions. Überall wo Werte sich unterscheiden
+wird eine Tabelle gezeigt:
+
+  | Einstellung        | Classic 1.12          | TBC 2.4.3             |
+  |--------------------|------------------------|------------------------|
+  | Arbeitsverzeichnis | cmangos-classic        | cmangos-tbc            |
+  | Git Repo (Core)    | mangos-classic         | mangos-tbc             |
+  | Git Repo (DB)      | classic-db             | tbc-db                 |
+  | Docker Image Tag   | cmangos-classic        | cmangos-tbc            |
+  | DB World           | classicmangos          | tbcmangos              |
+  | DB Characters      | classiccharacters      | tbccharacters          |
+  | DB Logs            | classiclogs            | tbclogs                |
+  | DB Realm           | classicrealmd          | tbcrealmd              |
+  | Docker Netzwerk    | cmangos-classic_...    | cmangos-tbc_...        |
+  | WoW Client         | 1.12.x                 | 2.4.3                  |
+
+In den Befehlen dieser Anleitung wird "classic" als Platzhalter verwendet.
+Für TBC einfach alle Vorkommen von "classic" durch "tbc" ersetzen.
+
+
+CONTAINER IN DIESEM SETUP
+────────────────────────────────────────
+  cmangos-db        MariaDB Datenbank
+  cmangos-mangosd   WoW Weltserver  ──────────────┐
+  cmangos-realmd    Authentifizierung             │ redet über mangos-net
+  koboldcpp         KI-Sprachmodell  ─────────────┘
+
+1. Playerbots (ike3/celguar)
+   200 Random Bot Accounts mit ~1800 Charakteren, erstellt beim ersten Start.
+   Konfiguration: aiplayerbot.conf
+
+2. AH-Bot — Befüllt das Auktionshaus automatisch.
+   Konfiguration: ahbot.conf
+
+3. KoboldCPP AI Chat — Lokales KI-Modell für echte Bot-Antworten.
+   Konfiguration: AiPlayerbot.LLMApiEndpoint in aiplayerbot.conf
+
+
+VORAUSSETZUNGEN
+────────────────────────────────────────
+- Docker + Docker Buildx:
+    sudo pacman -S docker-buildx
+- User zur Docker-Gruppe hinzufügen (einmalig):
+    sudo usermod -aG docker $USER && newgrp docker
+- WoW Client passend zur Expansion vorhanden
+
+WICHTIGE HINWEISE:
+  - Maps/vmaps von anderen Emulatoren sind NICHT kompatibel — immer selbst
+    extrahieren!
+  - Docker schreibt Dateien als root — nach jeder Extraktion chown ausfuehren
+  - aiplayerbot.conf wird unter /opt/etc/ gesucht (NICHT /opt/mangos/etc/)
+    — SYSCONFDIR = "../etc" relativ zur Binary in /opt/mangos/bin/
+    Das ist in Dockerfile und docker-compose.yml dieser Anleitung korrekt
+
+
+================================================================================
+  SCHRITT 1 — Verzeichnisstruktur anlegen
+================================================================================
+
+# Fuer Classic:
+mkdir -p /programmieren/WoW/cmangos-classic
+cd /programmieren/WoW/cmangos-classic
+
+# Fuer TBC:
+mkdir -p /programmieren/WoW/cmangos-tbc
+cd /programmieren/WoW/cmangos-tbc
+
+mkdir -p data/{maps,dbc,vmaps,mmaps} config sql-init ai-models
+
+
+================================================================================
+  SCHRITT 2 — Dockerfile anlegen
+================================================================================
+
+nano Dockerfile
+
+Inhalt (gilt fuer beide Expansions — nur git clone URL aendern!):
+───────
+# Stage 1: Build
+FROM archlinux:latest AS builder
+
+RUN pacman -Syu --noconfirm \
+    base-devel git cmake mariadb mariadb-libs boost boost-libs
+
+WORKDIR /build
+
+# Classic: mangos-classic  |  TBC: mangos-tbc
+RUN git clone https://github.com/cmangos/mangos-classic.git mangos
+
+RUN mkdir build && cd build && \
+    cmake ../mangos \
+        -DCMAKE_INSTALL_PREFIX=/opt/mangos \
+        -DBUILD_EXTRACTORS=ON \
+        -DBUILD_PLAYERBOTS=ON \
+        -DBUILD_AHBOT=ON \
+        -DPCH=1 \
+        -DDEBUG=0 && \
+    make -j$(nproc) && \
+    make install
+
+# Configs vorbereiten
+# ahbot.conf aus Quellcode (nicht .dist) um "Too few values" Fehler zu vermeiden
+RUN cd /opt/mangos/etc && \
+    cp mangosd.conf.dist mangosd.conf && \
+    cp realmd.conf.dist realmd.conf && \
+    cp anticheat.conf.dist anticheat.conf && \
+    cp /build/mangos/src/game/AuctionHouseBot/ahbot.conf.dist.in ahbot.conf
+
+# aiplayerbot.conf nach /opt/etc/ kopieren (SYSCONFDIR-Pfad der Binary!)
+RUN mkdir -p /opt/etc && \
+    cp /opt/mangos/etc/aiplayerbot.conf.dist /opt/etc/aiplayerbot.conf
+
+# Stage 2: Runtime
+FROM archlinux:latest AS runtime
+
+RUN pacman -Syu --noconfirm \
+    mariadb-libs mariadb-clients boost-libs openssl
+
+COPY --from=builder /opt/mangos /opt/mangos
+COPY --from=builder /opt/etc /opt/etc
+
+WORKDIR /opt/mangos
+
+Fuer TBC: Zeile "RUN git clone" aendern auf:
+  RUN git clone https://github.com/cmangos/mangos-tbc.git mangos
+
+
+================================================================================
+  SCHRITT 3 — .dockerignore anlegen
+================================================================================
+
+nano .dockerignore
+
+Inhalt:
+───────
+wow-client/
+classic-db/
+tbc-db/
+mangos-src/
+playerbots/
+data/
+ai-models/
+
+
+================================================================================
+  SCHRITT 4 — Docker Image bauen (~15-25 Minuten)
+================================================================================
+
+# Classic:
+docker build -t cmangos-classic .
+
+# TBC (dauert etwas laenger wegen mehr Content):
+docker build -t cmangos-tbc .
+
+Bei Problemen:
+  docker rmi cmangos-classic  # oder cmangos-tbc
+  docker build --no-cache -t cmangos-classic .
+
+
+================================================================================
+  SCHRITT 5 — WoW Client vorbereiten
+================================================================================
+
+Client in Arbeitsverzeichnis/wow-client/ legen.
+
+Unterordner MUSS "Data" heissen (grosses D):
+  mv wow-client/data wow-client/Data
+
+Berechtigungen:
+  sudo chmod -R 755 wow-client/
+
+
+================================================================================
+  SCHRITT 6 — Mapdaten extrahieren
+================================================================================
+
+# Classic:
+docker run --rm -it \
+    -v /programmieren/WoW/cmangos-classic/wow-client:/wow \
+    cmangos-classic \
+    bash -c "
+        cp /opt/mangos/bin/tools/* /wow/ && \
+        cd /wow && \
+        sed -i 's/\r//' ExtractResources.sh && \
+        bash ./ExtractResources.sh
+    "
+
+# TBC (cmangos-tbc statt cmangos-classic):
+docker run --rm -it \
+    -v /programmieren/WoW/cmangos-tbc/wow-client:/wow \
+    cmangos-tbc \
+    bash -c "
+        cp /opt/mangos/bin/tools/* /wow/ && \
+        cd /wow && \
+        sed -i 's/\r//' ExtractResources.sh && \
+        bash ./ExtractResources.sh
+    "
+
+Fragen im Skript — empfohlene Antworten:
+  Should all dataz be extracted?          -> n
+  Should dbc and maps be extracted?       -> y
+  Should vmaps be extracted?              -> y
+  Should mmaps be extracted?              -> n   (Stunden! Spaeter nachholen)
+  Only reextract offmesh tiles?           -> n   (WICHTIG: n, nicht y!)
+  High-resolution maps?                   -> n
+  High-resolution vmaps?                  -> n
+
+--- FALLS "Your output directory seems to be polluted" ---
+  rm -rf wow-client/Buildings
+  rm -rf wow-client/vmaps
+
+--- NACH DER EXTRAKTION ---
+# Berechtigungen korrigieren (Docker schreibt als root!)
+sudo chown -R $USER:$USER wow-client/
+
+# Daten verschieben (Pfad je nach Expansion anpassen)
+mv wow-client/maps  data/
+mv wow-client/dbc   data/
+mv wow-client/vmaps data/
+
+sudo chown -R $USER:$USER data/
+
+--- MMAPS NACHTRAEGLICH ---
+# Classic:
+docker run --rm -it \
+    -v /programmieren/WoW/cmangos-classic/wow-client:/wow \
+    -v /programmieren/WoW/cmangos-classic/data/maps:/wow/maps \
+    -v /programmieren/WoW/cmangos-classic/data/vmaps:/wow/vmaps \
+    -v /programmieren/WoW/cmangos-classic/data:/data \
+    cmangos-classic \
+    bash -c "
+        mkdir -p /wow/mmaps && cd /wow && \
+        ./MoveMapGen --offMeshInput offmesh.txt 0 --threads $(nproc) && \
+        ./MoveMapGen --offMeshInput offmesh.txt 1 --threads $(nproc) && \
+        cp mmaps/* /data/mmaps/
+    "
+sudo chown -R $USER:$USER data/mmaps/
+
+
+================================================================================
+  SCHRITT 7 — KI-Sprachmodell herunterladen
+================================================================================
+
+# Modell wird einmalig heruntergeladen und von beiden Expansions geteilt!
+# Empfehlung: In einem gemeinsamen Verzeichnis ablegen:
+mkdir -p /programmieren/WoW/ai-models
+cd /programmieren/WoW/ai-models
+
+# Kleines Modell (~1.4 GB):
+wget https://huggingface.co/mradermacher/Llama-3.2-1B-Instruct-Uncensored-GGUF/resolve/main/Llama-3.2-1B-Instruct-Uncensored.Q8_0.gguf
+
+# Besseres Modell (~4.9 GB, empfohlen bei >= 16 GB RAM):
+wget https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q8_0.gguf
+
+Alternativ: Modelle in jeweiligem ai-models/ Ordner ablegen.
+Modellname in docker-compose.yml (KCPP_ARGS) anpassen!
+
+
+================================================================================
+  SCHRITT 8 — Configs holen und anpassen
+================================================================================
+
+--- mangosd.conf ---
+# Classic:
+docker run --rm cmangos-classic cat /opt/mangos/etc/mangosd.conf > config/mangosd.conf
+# TBC:
+docker run --rm cmangos-tbc cat /opt/mangos/etc/mangosd.conf > config/mangosd.conf
+
+In config/mangosd.conf anpassen:
+  # Classic:
+  LoginDatabaseInfo     = "db;3306;mangos;mangos;classicrealmd"
+  WorldDatabaseInfo     = "db;3306;mangos;mangos;classicmangos"
+  CharacterDatabaseInfo = "db;3306;mangos;mangos;classiccharacters"
+  LogsDatabaseInfo      = "db;3306;mangos;mangos;classiclogs"
+
+  # TBC:
+  LoginDatabaseInfo     = "db;3306;mangos;mangos;tbcrealmd"
+  WorldDatabaseInfo     = "db;3306;mangos;mangos;tbcmangos"
+  CharacterDatabaseInfo = "db;3306;mangos;mangos;tbccharacters"
+  LogsDatabaseInfo      = "db;3306;mangos;mangos;tbclogs"
+
+--- realmd.conf ---
+docker run --rm cmangos-classic cat /opt/mangos/etc/realmd.conf > config/realmd.conf
+# In config/realmd.conf: LoginDatabaseInfo auf classicrealmd / tbcrealmd setzen
+
+--- ahbot.conf ---
+docker run --rm cmangos-classic cat /opt/mangos/etc/ahbot.conf > config/ahbot.conf
+
+In config/ahbot.conf:
+  AuctionHouseBot.Seller.Enabled = 1
+  AuctionHouseBot.Buyer.Enabled  = 1
+  AuctionHouseBot.Buyer.Alliance = 50
+  AuctionHouseBot.Buyer.Horde    = 50
+  AuctionHouseBot.Buyer.Neutral  = 50
+
+--- aiplayerbot.conf ---
+# WICHTIG: Aus /opt/etc/ holen (nicht /opt/mangos/etc/)!
+docker run --rm cmangos-classic cat /opt/etc/aiplayerbot.conf > config/aiplayerbot.conf
+
+In config/aiplayerbot.conf:
+  AiPlayerbot.Enabled = 1
+  AiPlayerbot.RandomBotAutologin = 1
+  AiPlayerbot.MinRandomBots = 50
+  AiPlayerbot.MaxRandomBots = 200
+  AiPlayerbot.LLMEnabled = 2
+  AiPlayerbot.LLMApiEndpoint = http://koboldcpp:5001/api/v1/generate
+  AiPlayerbot.LLMContextLength = 2048
+  AiPlayerbot.LLMGenerationTimeout = 120
+  AiPlayerbot.LLMMaxSimultaniousGenerations = 1
+  AiPlayerbot.LLMDefaultPromptsFile = llm_character_card.txt
+
+
+================================================================================
+  SCHRITT 9 — SQL Init Datei anlegen
+================================================================================
+
+nano sql-init/01-init.sql
+
+# Classic:
+───────
+CREATE DATABASE IF NOT EXISTS classicmangos;
+CREATE DATABASE IF NOT EXISTS classiccharacters;
+CREATE DATABASE IF NOT EXISTS classiclogs;
+CREATE DATABASE IF NOT EXISTS classicrealmd;
+GRANT ALL ON classicmangos.*     TO 'mangos'@'%' IDENTIFIED BY 'mangos';
+GRANT ALL ON classiccharacters.* TO 'mangos'@'%' IDENTIFIED BY 'mangos';
+GRANT ALL ON classiclogs.*       TO 'mangos'@'%' IDENTIFIED BY 'mangos';
+GRANT ALL ON classicrealmd.*     TO 'mangos'@'%' IDENTIFIED BY 'mangos';
+FLUSH PRIVILEGES;
+
+# TBC (alle "classic" durch "tbc" ersetzen):
+───────
+CREATE DATABASE IF NOT EXISTS tbcmangos;
+CREATE DATABASE IF NOT EXISTS tbccharacters;
+CREATE DATABASE IF NOT EXISTS tbclogs;
+CREATE DATABASE IF NOT EXISTS tbcrealmd;
+GRANT ALL ON tbcmangos.*     TO 'mangos'@'%' IDENTIFIED BY 'mangos';
+GRANT ALL ON tbccharacters.* TO 'mangos'@'%' IDENTIFIED BY 'mangos';
+GRANT ALL ON tbclogs.*       TO 'mangos'@'%' IDENTIFIED BY 'mangos';
+GRANT ALL ON tbcrealmd.*     TO 'mangos'@'%' IDENTIFIED BY 'mangos';
+FLUSH PRIVILEGES;
+
+
+================================================================================
+  SCHRITT 10 — docker-compose.yml anlegen
+================================================================================
+
+nano docker-compose.yml
+
+# Classic-Version (fuer TBC: alle "classic" durch "tbc" ersetzen,
+#                  Ports anpassen wenn beide gleichzeitig laufen sollen):
+───────
+services:
+
+  db:
+    image: mariadb:10.11
+    container_name: cmangos-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: mangos
+      MYSQL_PASSWORD: mangos
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./sql-init:/docker-entrypoint-initdb.d
+    networks:
+      - mangos-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mangosd:
+    image: cmangos-classic        # TBC: cmangos-tbc
+    container_name: cmangos-mangosd
+    command: /opt/mangos/bin/mangosd -c /opt/mangos/etc/mangosd.conf -a /opt/mangos/etc/ahbot.conf
+    volumes:
+      - ./data/maps:/opt/mangos/maps
+      - ./data/dbc:/opt/mangos/dbc
+      - ./data/vmaps:/opt/mangos/vmaps
+      - ./data/mmaps:/opt/mangos/mmaps
+      - ./config/mangosd.conf:/opt/mangos/etc/mangosd.conf
+      - ./config/ahbot.conf:/opt/mangos/etc/ahbot.conf
+      # aiplayerbot.conf MUSS nach /opt/etc/ (nicht /opt/mangos/etc/!)
+      - ./config/aiplayerbot.conf:/opt/etc/aiplayerbot.conf
+    ports:
+      - "8085:8085"   # TBC gleichzeitig mit Classic: 8086:8085
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mangos-net
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+  realmd:
+    image: cmangos-classic        # TBC: cmangos-tbc
+    container_name: cmangos-realmd
+    command: /opt/mangos/bin/realmd -c /opt/mangos/etc/realmd.conf
+    volumes:
+      - ./config/realmd.conf:/opt/mangos/etc/realmd.conf
+    ports:
+      - "3724:3724"   # TBC gleichzeitig mit Classic: 3725:3724
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mangos-net
+    restart: unless-stopped
+
+  koboldcpp:
+    image: koboldai/koboldcpp:latest
+    container_name: koboldcpp
+    environment:
+      KCPP_DONT_TUNNEL: "true"
+      KCPP_DONT_UPDATE: "true"
+      KCPP_ARGS: "--model /models/Llama-3.2-1B-Instruct-Uncensored.Q8_0.gguf --port 5001 --host 0.0.0.0 --threads 4 --nommap"
+    volumes:
+      - ./ai-models:/models
+      - koboldcpp_bin:/workspace
+    ports:
+      - "5001:5001"   # TBC gleichzeitig mit Classic: 5002:5001
+    networks:
+      - mangos-net
+    restart: unless-stopped
+
+networks:
+  mangos-net:
+
+volumes:
+  db_data:
+  koboldcpp_bin:
+
+Hinweis: koboldcpp NUR per environment/KCPP_ARGS konfigurieren — kein
+         command-Block! Das Image verwendet einen eigenen Entrypoint.
+
+
+================================================================================
+  SCHRITT 11 — Datenbank starten und befuellen
+================================================================================
+
+# DB starten
+docker compose up db -d
+
+# Repos klonen
+# Classic:
+git clone https://github.com/cmangos/classic-db.git
+git clone https://github.com/cmangos/mangos-classic.git mangos-src
+git clone https://github.com/cmangos/playerbots.git
+
+# TBC:
+git clone https://github.com/cmangos/tbc-db.git
+git clone https://github.com/cmangos/mangos-tbc.git mangos-src
+git clone https://github.com/cmangos/playerbots.git
+
+# InstallFullDB.config anpassen (Classic: classic-db/  TBC: tbc-db/)
+nano classic-db/InstallFullDB.config   # oder tbc-db/
+
+Werte setzen:
+  MYSQL_HOST="db"
+  MYSQL_USERNAME="mangos"
+  MYSQL_PASSWORD="mangos"
+  MYSQL_USERIP="%"
+  MYSQL_PATH="/usr/bin/mariadb"
+  MYSQL_DUMP_PATH="/usr/bin/mariadb-dump"
+  CORE_PATH="/work/mangos-src"
+
+# mangos User volle Rechte geben
+docker exec cmangos-db mariadb -uroot -proot -e "
+GRANT ALL PRIVILEGES ON *.* TO 'mangos'@'%' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+"
+
+# Haupt-Datenbank installieren
+# Classic:
+docker run --rm -it \
+    --network cmangos-classic_mangos-net \
+    -v /programmieren/WoW/cmangos-classic:/work \
+    cmangos-classic \
+    bash -c "cd /work/classic-db && bash ./InstallFullDB.sh"
+
+# TBC:
+docker run --rm -it \
+    --network cmangos-tbc_mangos-net \
+    -v /programmieren/WoW/cmangos-tbc:/work \
+    cmangos-tbc \
+    bash -c "cd /work/tbc-db && bash ./InstallFullDB.sh"
+
+Im Menue: 4 -> 1 -> "DeleteAll" eingeben
+
+
+================================================================================
+  SCHRITT 12 — Datenbank-Updates einspielen (PFLICHT!)
+================================================================================
+
+Nach dem InstallFullDB erscheint ggf.:
+  "Warning: These DBs need core update: 'realmd' 'characters' 'logs'
+   You can use option 3 to apply latest core update"
+
+FALLS InstallFullDB Option 3 mit Fehler abbricht ("10#: invalid integer
+constant" — bekannter Bash-Bug), die Updates manuell einspielen:
+
+# Classic:
+docker run --rm -it \
+    --network cmangos-classic_mangos-net \
+    -v /programmieren/WoW/cmangos-classic/mangos-src:/mangos \
+    cmangos-classic \
+    bash -c "
+        echo '--- characters base schema ---'
+        mariadb --skip-ssl -hdb -umangos -pmangos classiccharacters \
+            < /mangos/sql/base/characters.sql
+        echo '--- characters updates ---'
+        find /mangos/sql/updates/characters -name '*.sql' | sort | \
+            while read f; do
+                mariadb --skip-ssl -hdb -umangos -pmangos classiccharacters \
+                    < \$f 2>/dev/null
+            done
+        echo '--- realmd base schema ---'
+        mariadb --skip-ssl -hdb -umangos -pmangos classicrealmd \
+            < /mangos/sql/base/realmd.sql
+        echo '--- realmd updates ---'
+        find /mangos/sql/updates/realmd -name '*.sql' | sort | \
+            while read f; do
+                mariadb --skip-ssl -hdb -umangos -pmangos classicrealmd \
+                    < \$f 2>/dev/null
+            done
+        echo '--- logs base schema ---'
+        mariadb --skip-ssl -hdb -umangos -pmangos classiclogs \
+            < /mangos/sql/base/logs.sql
+        echo '--- logs updates ---'
+        find /mangos/sql/updates/logs -name '*.sql' | sort | \
+            while read f; do
+                mariadb --skip-ssl -hdb -umangos -pmangos classiclogs \
+                    < \$f 2>/dev/null
+            done
+        echo 'All done!'
+    "
+
+# TBC: alle "classic" durch "tbc" ersetzen, cmangos-classic durch cmangos-tbc,
+#       cmangos-classic_mangos-net durch cmangos-tbc_mangos-net
+
+Hinweis: 2>/dev/null unterdrückt harmlose "Table already exists" Fehler.
+         Die Updates sind idempotent — bereits vorhandene Strukturen werden
+         einfach uebersprungen.
+
+
+================================================================================
+  SCHRITT 13 — Playerbots SQL-Tabellen einspielen (PFLICHT!)
+================================================================================
+
+Ohne diesen Schritt: Server crasht mit "AddAItem()" oder Random Bots
+koennen nicht erstellt werden.
+
+--- Characters-Tabellen ---
+# Classic:
+docker run --rm -it \
+    --network cmangos-classic_mangos-net \
+    -v /programmieren/WoW/cmangos-classic/playerbots:/playerbots \
+    cmangos-classic \
+    bash -c "
+        find /playerbots/sql/characters -name '*.sql' | sort | while read f; do
+            echo \"Importing: \$f\"
+            mariadb --skip-ssl -hdb -umangos -pmangos classiccharacters < \$f
+        done
+    "
+
+# TBC (tbccharacters statt classiccharacters, cmangos-tbc statt cmangos-classic):
+docker run --rm -it \
+    --network cmangos-tbc_mangos-net \
+    -v /programmieren/WoW/cmangos-tbc/playerbots:/playerbots \
+    cmangos-tbc \
+    bash -c "
+        find /playerbots/sql/characters -name '*.sql' | sort | while read f; do
+            echo \"Importing: \$f\"
+            mariadb --skip-ssl -hdb -umangos -pmangos tbccharacters < \$f
+        done
+    "
+
+--- World-Tabellen (expansionsspezifisch!) ---
+# Classic:
+docker run --rm -it \
+    --network cmangos-classic_mangos-net \
+    -v /programmieren/WoW/cmangos-classic/playerbots:/playerbots \
+    cmangos-classic \
+    bash -c "
+        for f in /playerbots/sql/world/ai_playerbot_rpg_races.sql \
+                  /playerbots/sql/world/ai_playerbot_indexes.sql \
+                  /playerbots/sql/world/classic/*.sql \
+                  /playerbots/sql/world/*.sql; do
+            [ -f \"\$f\" ] && mariadb --skip-ssl -hdb -umangos -pmangos \
+                classicmangos < \$f 2>/dev/null && echo \"OK: \$f\"
+        done
+        echo 'Done!'
+    "
+
+# TBC (tbcmangos statt classicmangos, tbc statt classic im Pfad):
+docker run --rm -it \
+    --network cmangos-tbc_mangos-net \
+    -v /programmieren/WoW/cmangos-tbc/playerbots:/playerbots \
+    cmangos-tbc \
+    bash -c "
+        for f in /playerbots/sql/world/ai_playerbot_rpg_races.sql \
+                  /playerbots/sql/world/ai_playerbot_indexes.sql \
+                  /playerbots/sql/world/tbc/*.sql \
+                  /playerbots/sql/world/*.sql; do
+            [ -f \"\$f\" ] && mariadb --skip-ssl -hdb -umangos -pmangos \
+                tbcmangos < \$f 2>/dev/null && echo \"OK: \$f\"
+        done
+        echo 'Done!'
+    "
+
+Ergebnis pruefen:
+  # Classic:
+  docker exec cmangos-db mariadb -uroot -proot classiccharacters \
+      -e "SHOW TABLES LIKE 'ai_playerbot%';"
+  # TBC:
+  docker exec cmangos-db mariadb -uroot -proot tbccharacters \
+      -e "SHOW TABLES LIKE 'ai_playerbot%';"
+  -> Sollte ~10 Tabellen zeigen
+
+
+================================================================================
+  SCHRITT 14 — Alles starten
+================================================================================
+
+docker compose up -d
+
+# KoboldCPP verfolgen
+docker compose logs koboldcpp -f
+# Bereit: "Please connect to custom endpoint at http://0.0.0.0:5001"
+
+# Worldserver verfolgen
+docker compose logs mangosd -f
+# Bereit: "200 random bot accounts with XXXX characters available"
+#         "CMANGOS: World initialized"
+# Erster Start dauert laenger (~5-10 Min) wegen Bot-Charakter-Erstellung
+
+
+================================================================================
+  SCHRITT 15 — Ersten Account anlegen
+================================================================================
+
+docker attach cmangos-mangosd
+
+  account create DeinName DeinPasswort
+  account set gmlevel DeinName 3
+
+Detachen: Ctrl+P dann Ctrl+Q
+
+
+================================================================================
+  SCHRITT 16 — WoW Client konfigurieren
+================================================================================
+
+Datei: Data/deDE/realmlist.wtf (oder enUS)
+  set realmlist 127.0.0.1
+
+WoW mit wow.exe starten, NICHT ueber den Launcher!
+
+
+================================================================================
+  SCHRITT 17 — Bots und AI Chat verwenden
+================================================================================
+
+--- Random Bots ---
+Wandern automatisch durch die Welt wenn RandomBotAutologin = 1 gesetzt.
+Im Log: "200 random bot accounts with XXXX characters available"
+
+--- Eigene Bots ---
+  .bot add BOTNAME       -> Bot hinzufuegen
+  .bot remove BOTNAME    -> Bot entfernen
+Addon: https://github.com/celguar/ikebotui
+
+--- AI Chat ---
+LLMEnabled = 2: AI Chat ist fuer alle Bots automatisch aktiv.
+Einfach im Party-Chat schreiben.
+LLMEnabled = 1: /p nc +ai chat  /  /p nc -ai chat
+
+--- Charakter-Karten (optional) ---
+nano config/llm_character_card.txt
+Format: name::persoenlichkeit
+  Thorgar::I am a gruff dwarven warrior who speaks in short sentences.
+  Sylvara::I am a mysterious night elf druid who speaks in riddles.
+Volume in docker-compose.yml ergaenzen:
+  - ./config/llm_character_card.txt:/opt/mangos/llm_character_card.txt
+
+--- AH-Bot ---
+Laeuft vollautomatisch. AH fuellt sich schrittweise auf.
+GM-Befehle: .ahbot reload / .ahbot clear / .ahbot items add all
+
+--- KoboldCPP Web-UI ---
+  http://localhost:5001
+
+
+================================================================================
+  BEKANNTE FEHLER UND LOESUNGEN
+================================================================================
+
+FEHLER: AI Playerbot is Disabled. Unable to open configuration file
+────────────────────────────────────────
+Ursache: SYSCONFDIR = "../etc" relativ zur Binary = /opt/etc/ (nicht /opt/mangos/etc/)
+         Mit strace bestaetigt: openat(AT_FDCWD, "../etc/aiplayerbot.conf", ...)
+Loesung: Volume-Mount in docker-compose.yml:
+           - ./config/aiplayerbot.conf:/opt/etc/aiplayerbot.conf
+         Im Dockerfile:
+           RUN mkdir -p /opt/etc && cp aiplayerbot.conf.dist /opt/etc/aiplayerbot.conf
+           COPY --from=builder /opt/etc /opt/etc
+
+
+FEHLER: character_db_version / realmd_db_version doesn't exist
+────────────────────────────────────────
+Ursache: InstallFullDB hat die Core-Updates nicht eingespielt (Option 3
+         schlaegt bei neuem Bash mit "10#: invalid integer constant" fehl)
+Loesung: Schritt 12 manuell ausfuehren — base schema + alle updates einspielen
+
+
+FEHLER: "10#: invalid integer constant" beim InstallFullDB Option 3
+────────────────────────────────────────
+Ursache: Bekannter Bug in InstallFullDB.sh mit neueren Bash-Versionen
+Loesung: Schritt 12 manuell ausfuehren (umgeht das Skript komplett)
+
+
+FEHLER: "Your output directory seems to be polluted"
+────────────────────────────────────────
+Ursache: Alter Buildings/ oder vmaps/ Ordner vorhanden
+Loesung:
+  rm -rf wow-client/Buildings
+  rm -rf wow-client/vmaps
+
+
+FEHLER: VMap file './vmaps/000.vmtree' is missing or point to wrong version
+────────────────────────────────────────
+Ursache: vmaps von anderem Emulator (VMaNGOS etc.) — INKOMPATIBEL!
+Loesung:
+  rm -rf data/vmaps/*
+  rm -rf wow-client/Buildings
+  rm -rf wow-client/vmaps
+  Dann Schritt 6 wiederholen (nur vmaps).
+
+
+FEHLER: Extrahierte Dateien gehoeren root
+────────────────────────────────────────
+Ursache: Docker-Container laufen als root
+Loesung: sudo chown -R $USER:$USER /programmieren/WoW/cmangos-classic/
+
+
+FEHLER: AddAItem(): mAitems.find(...) == mAitems.end() / Server crasht
+────────────────────────────────────────
+Ursache: Korrupte Eintraege in der auction-Tabelle
+Loesung:
+  # Classic:
+  docker exec cmangos-db mariadb -uroot -proot classiccharacters \
+      -e "TRUNCATE TABLE auction;"
+  # TBC:
+  docker exec cmangos-db mariadb -uroot -proot tbccharacters \
+      -e "TRUNCATE TABLE auction;"
+  docker compose restart mangosd
+
+
+FEHLER: Table 'ai_playerbot_random_bots' doesn't exist
+────────────────────────────────────────
+Ursache: Playerbots SQL-Tabellen nicht eingespielt
+Loesung: Schritt 13 durchfuehren
+
+
+FEHLER: TLS/SSL error: SSL is required
+────────────────────────────────────────
+Loesung: --skip-ssl Flag (in Schritten 12+13 bereits enthalten)
+
+
+FEHLER: mariadb: unknown variable 'ssl-mode=DISABLED'
+────────────────────────────────────────
+Loesung: --skip-ssl statt --ssl-mode=DISABLED (MariaDB-Syntax, nicht MySQL)
+
+
+FEHLER: Deprecated program name mysql / mysqldump
+────────────────────────────────────────
+Loesung: In InstallFullDB.config:
+  MYSQL_PATH="/usr/bin/mariadb"
+  MYSQL_DUMP_PATH="/usr/bin/mariadb-dump"
+
+
+FEHLER: KoboldCPP OCI runtime error / executable not found
+────────────────────────────────────────
+Ursache: command-Block in docker-compose.yml fuer koboldcpp
+Loesung: Nur environment/KCPP_ARGS — KEIN command-Block!
+
+
+FEHLER: Bots antworten nicht mit KI
+────────────────────────────────────────
+  1. Endpunkt: http://koboldcpp:5001 (nicht localhost!)
+  2. KoboldCPP bereit? docker compose logs koboldcpp -f
+     Warten auf: "Please connect to custom endpoint at http://0.0.0.0:5001"
+  3. AiPlayerbot.LLMEnabled = 2 in aiplayerbot.conf
+
+
+FEHLER: "Can't get bot text loot! No bots texts loaded!"
+────────────────────────────────────────
+Ursache: Optionale World-Texttabellen fehlen (harmlos, Bots funktionieren)
+Loesung (um Meldungen zu entfernen):
+  # Classic:
+  docker run --rm -it \
+      --network cmangos-classic_mangos-net \
+      -v /programmieren/WoW/cmangos-classic/playerbots:/playerbots \
+      cmangos-classic \
+      bash -c "
+          find /playerbots/sql/world -maxdepth 1 -name '*.sql' | sort | \
+              while read f; do
+                  mariadb --skip-ssl -hdb -umangos -pmangos classicmangos \
+                      < \$f 2>/dev/null
+              done
+      "
+  docker compose restart mangosd
+
+
+================================================================================
+  NUETZLICHE BEFEHLE
+================================================================================
+
+Server stoppen/starten:
+  docker compose down
+  docker compose up -d
+
+Einzeln neustarten:
+  docker compose restart mangosd
+  docker compose restart koboldcpp
+
+Logs:
+  docker compose logs mangosd -f
+  docker compose logs koboldcpp -f
+
+mangosd Konsole:
+  docker attach cmangos-mangosd  (Detachen: Ctrl+P Ctrl+Q)
+
+DB abfragen:
+  docker exec cmangos-db mariadb -uroot -proot
+
+Playerbots-Tabellen pruefen:
+  docker exec cmangos-db mariadb -uroot -proot classiccharacters \
+      -e "SHOW TABLES LIKE 'ai_playerbot%';"
+
+Docker Speicher pruefen und bereinigen:
+  docker system df
+  docker system prune -f          # gestoppte Container + ungenutzte Images
+  docker builder prune -f         # Build-Cache (sicher, gross!)
+  docker system prune -f --volumes  # VORSICHT: auch ungenutzte Volumes!
+
+DB-Backup:
+  docker exec cmangos-db mariadb-dump -uroot -proot classicmangos \
+      > classicmangos_backup.sql
+  docker exec cmangos-db mariadb-dump -uroot -proot classiccharacters \
+      > classiccharacters_backup.sql
+
+Alles loeschen inkl. DB:
+  docker compose down -v
+  docker rmi cmangos-classic  # oder cmangos-tbc
+
+Neu bauen:
+  docker build --no-cache -t cmangos-classic .
+
+Berechtigungen korrigieren:
+  sudo chown -R $USER:$USER /programmieren/WoW/cmangos-classic/
+
+KoboldCPP im Browser:
+  http://localhost:5001
+
+================================================================================
+  VERSIONS-HISTORY
+================================================================================
+
+  v1  Erste Version (Classic only)
+  v2  AH-Bot und Playerbots ergaenzt
+  v3  KoboldCPP AI Chat ergaenzt
+  v4  aiplayerbot.conf Pfad-Fix (/opt/etc/), chown-Hinweise
+  v5  Playerbots SQL manuell einspielen (Schritt 12), --skip-ssl,
+      Dockerfile mit COPY /opt/etc, strace-Diagnose dokumentiert
+  v6  TBC-Support ergaenzt, Expansion-Referenztabelle,
+      Schritt 12 (DB-Updates manuell) als eigener Schritt,
+      "10#: invalid integer constant" Bug dokumentiert,
+      "Can't get bot text" Loesung ergaenzt,
+      World-SQL-Tabellen tbc/ vs classic/ Unterschied,
+      Alle Befehle mit Classic/TBC-Variante
+
+================================================================================
